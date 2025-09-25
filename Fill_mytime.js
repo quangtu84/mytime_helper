@@ -103,6 +103,8 @@ function waitForLogoToAppearAndClick(text, callback) {
 }
 
 function fillCommentBox(text) {
+  if (!text || text.trim() === '') return; // Skip if text is undefined or blank
+
   const el = document.querySelector('textarea.ms-TextField-field');
   if (el) {
     el.focus();
@@ -250,3 +252,4 @@ loadExcelData(async () => {
   await window.fillWeekFromExcel(window.myExcelData);   // fill week % for every Excel row
   console.log('✅ Fill success');
 });
+
