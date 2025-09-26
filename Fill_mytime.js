@@ -59,6 +59,29 @@ function loadExcelData(callback) {
   document.head.appendChild(script);
 }
 
+// Reusable helper
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+
+async function pickDropdownOption(caretEl, optionText, timing = {}) {
+  const { beforeOpen = 1000, afterOpen = 500, afterPick = 500 } = timing;
+  if (!caretEl) return false;
+  const normalize = s => (s || '').replace(/\u00a0/g, ' ').trim();
+
+  await delay(beforeOpen);
+  caretEl.click();
+  await delay(afterOpen);
+
+  const option = [...document.querySelectorAll('.ms-Dropdown-optionText')]
+    .find(el => el.offsetParent !== null && normalize(el.textContent) === normalize(optionText));
+
+  if (!option) return false;
+
+  option.click();
+  await delay(afterPick);
+  return true;
+}
+
 async function waitForText(text, timeout = 10000) {
   const start = performance.now();
   while (performance.now() - start < timeout) {
@@ -147,14 +170,28 @@ window.fillWeekFromExcel = async function (dataRows) {
   for (const r of (dataRows || [])) {
     const logo = (r['Logo'] || '').trim();
     const prod = (r['Product L1'] || '').trim();
+    const isFTO = norm(logo) === 'fto' || norm(prod) === 'fto';
 
-    // Find the row by headerColumn2 (Logo) and headerColumn3 (Product L1)
-    const rowEl = [...document.querySelectorAll('.ms-DetailsRow-fields[data-automationid="DetailsRowFields"]')]
-      .find(el =>
-        norm(el.querySelector('[data-automation-key="headerColumn2"]')?.textContent) === norm(logo) &&
-        norm(el.querySelector('[data-automation-key="headerColumn3"]')?.textContent) === norm(prod)
-      );
-    if (!rowEl) continue;
+    // Find the row: FTO -> headerColumn1 === "Vacation, LOA"; else normal Logo+Product
+    let rowEl;
+    if (isFTO) {
+      rowEl = [...document.querySelectorAll('.ms-DetailsRow-fields[data-automationid="DetailsRowFields"]')]
+        .find(el => norm(el.querySelector('[data-automation-key="headerColumn1"]')?.textContent) === norm('Vacation, LOA'));
+      if (!rowEl) continue;
+
+      // Click the "Vacation, LOA" cell to ensure the row is active/visible
+      const headerCell = rowEl.querySelector('[data-automation-key="headerColumn1"]');
+      headerCell?.scrollIntoView({ block: 'center' });
+      headerCell?.click();
+      await sleep(60);
+    } else {
+      rowEl = [...document.querySelectorAll('.ms-DetailsRow-fields[data-automationid="DetailsRowFields"]')]
+        .find(el =>
+          norm(el.querySelector('[data-automation-key="headerColumn2"]')?.textContent) === norm(logo) &&
+          norm(el.querySelector('[data-automation-key="headerColumn3"]')?.textContent) === norm(prod)
+        );
+      if (!rowEl) continue;
+    }
 
     // Build target values array for Mon..Fri (fallback to %work if day missing)
     const vals = days.map(d => r[d] ?? r['%work'] ?? r['% work'] ?? '');
@@ -198,13 +235,15 @@ window.fillWeekFromExcel = async function (dataRows) {
 };
 
 
-
 // Start everything (process sequentially)
 loadExcelData(async () => {
   for (const row of window.myExcelData) {
     const logo = row["Logo"];
     const tool = mapProductName(row["Product L1"]);
     const comment = row["Case Number"];
+
+    const customerLogo = document.querySelector('input[placeholder="Search for Customer"]');
+    const productName = document.querySelector('input[placeholder="Search for Product"]');
 
     const clickNew = () => document.querySelector('.ms-Button-label')?.closest('button')?.click();
 
@@ -216,40 +255,51 @@ loadExcelData(async () => {
       await new Promise(r => setTimeout(r, 600));
       opened = await waitForText('New Time Entry', 1500);
     }
-
     // Proceed with your existing flow once it's open
-    await new Promise(r => setTimeout(r, 1000));
-    [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[0]?.click();
-    await new Promise(r => setTimeout(r, 500));
-    [...document.querySelectorAll('.ms-Dropdown-optionText')].find(e => e.textContent.trim() === 'Post-Sales')?.click();
-    await new Promise(r => setTimeout(r, 500));
-    [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[1]?.click();
-    await new Promise(r => setTimeout(r, 500));
-    [...document.querySelectorAll('.ms-Dropdown-optionText')].find(e => e.textContent.trim() === 'Reactive/Tape-out support')?.click();
-    await new Promise(r => setTimeout(r, 500));
+    const category = [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[0];
+    const activity = [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[1];
 
-    const customerLogo = document.querySelector('input[placeholder="Search for Customer"]');
-    const productName = document.querySelector('input[placeholder="Search for Product"]');
+    // === NEW: choose texts based on FTO ===
+    // Treat these as "FTO" types (adjust list as needed)
+    const isFTO = v => /^\s*(FTO|PTO|Flex Time Off)\s*$/i.test((v || '').trim());
+    const categoryText = (isFTO(logo) || isFTO(tool)) ? 'Administration' : 'Post-Sales';
+    const activityText = (isFTO(logo) || isFTO(tool)) ? 'Vacation, LOA' : 'Reactive/Tape-out support';
 
-    // Await the entire fill + save + dialog close flow
-    await new Promise(resolve => {
-      populateTextbox(customerLogo, logo, () => {
-        waitForLogoToAppearAndClick(logo, () => {
-          populateTextbox(productName, tool, () => {
-            waitForLogoToAppearAndClick(tool, async () => {
-              fillCommentBox(comment);
+    // Pick Category and Activity
+    await pickDropdownOption(category, categoryText);
+    await pickDropdownOption(activity, activityText);
 
-              Array.from(document.querySelectorAll('span.ms-Button-label'))
-                .find(el => el.textContent.trim() === "Save and Close")
-                ?.closest('button')?.click();
 
-              await waitForSaveAndCloseToDisappear(); // <- ensures we wait before next row
-              resolve();
-            });
-          });
+
+// Await the entire fill + save + dialog close flow (FTO vs non-FTO)
+await new Promise(resolve => {
+  const doSaveAndClose = async () => {
+    Array.from(document.querySelectorAll('span.ms-Button-label'))
+      .find(el => el.textContent.trim() === "Save and Close")
+      ?.closest('button')?.click();
+    await waitForSaveAndCloseToDisappear();
+    resolve();
+  };
+
+  // --- Case 1: FTO -> only Save & Close, skip populate flow ---
+  if (isFTO(tool)) {
+    (async () => { await doSaveAndClose(); })();
+    return;
+  }
+
+  // --- Case 2: Normal flow -> populate then Save & Close ---
+  populateTextbox(customerLogo, logo, () => {
+    waitForLogoToAppearAndClick(logo, () => {
+      populateTextbox(productName, tool, () => {
+        waitForLogoToAppearAndClick(tool, async () => {
+          fillCommentBox(comment);
+          await doSaveAndClose();
         });
       });
     });
+  });
+});
+
 
     // tiny buffer before next row (optional)
     await new Promise(r => setTimeout(r, 1000));
