@@ -197,6 +197,8 @@ window.fillWeekFromExcel = async function (dataRows) {
   }
 };
 
+
+
 // Start everything (process sequentially)
 loadExcelData(async () => {
   for (const row of window.myExcelData) {
@@ -204,52 +206,57 @@ loadExcelData(async () => {
     const tool = mapProductName(row["Product L1"]);
     const comment = row["Case Number"];
 
-    document.querySelector('.ms-Button-label')?.closest('button')?.click(); // New
+    const clickNew = () => document.querySelector('.ms-Button-label')?.closest('button')?.click();
 
-    if (await waitForText('New Time Entry')) {
-      await new Promise(r => setTimeout(r, 1000));
-      [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[0]?.click();
-      await new Promise(r => setTimeout(r, 500));
-      [...document.querySelectorAll('.ms-Dropdown-optionText')].find(e => e.textContent.trim() === 'Post-Sales')?.click();
-      await new Promise(r => setTimeout(r, 500));
-      [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[1]?.click();
-      await new Promise(r => setTimeout(r, 500));
-      [...document.querySelectorAll('.ms-Dropdown-optionText')].find(e => e.textContent.trim() === 'Reactive/Tape-out support')?.click();
-      await new Promise(r => setTimeout(r, 500));
+    // Keep trying until "New Time Entry" is visible
+    let opened = false;
+    while (!opened) {
+      clickNew();
+      // small delay before checking
+      await new Promise(r => setTimeout(r, 600));
+      opened = await waitForText('New Time Entry', 1500);
+    }
 
-      const customerLogo = document.querySelector('input[placeholder="Search for Customer"]');
-      const productName = document.querySelector('input[placeholder="Search for Product"]');
+    // Proceed with your existing flow once it's open
+    await new Promise(r => setTimeout(r, 1000));
+    [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[0]?.click();
+    await new Promise(r => setTimeout(r, 500));
+    [...document.querySelectorAll('.ms-Dropdown-optionText')].find(e => e.textContent.trim() === 'Post-Sales')?.click();
+    await new Promise(r => setTimeout(r, 500));
+    [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[1]?.click();
+    await new Promise(r => setTimeout(r, 500));
+    [...document.querySelectorAll('.ms-Dropdown-optionText')].find(e => e.textContent.trim() === 'Reactive/Tape-out support')?.click();
+    await new Promise(r => setTimeout(r, 500));
 
-      // Await the entire fill + save + dialog close flow
-      await new Promise(resolve => {
-        populateTextbox(customerLogo, logo, () => {
-          waitForLogoToAppearAndClick(logo, () => {
-            populateTextbox(productName, tool, () => {
-              waitForLogoToAppearAndClick(tool, async () => {
-                fillCommentBox(comment);
+    const customerLogo = document.querySelector('input[placeholder="Search for Customer"]');
+    const productName = document.querySelector('input[placeholder="Search for Product"]');
 
-                Array.from(document.querySelectorAll('span.ms-Button-label'))
-                  .find(el => el.textContent.trim() === "Save and Close")
-                  ?.closest('button')?.click();
+    // Await the entire fill + save + dialog close flow
+    await new Promise(resolve => {
+      populateTextbox(customerLogo, logo, () => {
+        waitForLogoToAppearAndClick(logo, () => {
+          populateTextbox(productName, tool, () => {
+            waitForLogoToAppearAndClick(tool, async () => {
+              fillCommentBox(comment);
 
-                await waitForSaveAndCloseToDisappear(); // <- ensures we wait before next row
-                resolve();
-              });
+              Array.from(document.querySelectorAll('span.ms-Button-label'))
+                .find(el => el.textContent.trim() === "Save and Close")
+                ?.closest('button')?.click();
+
+              await waitForSaveAndCloseToDisappear(); // <- ensures we wait before next row
+              resolve();
             });
           });
         });
       });
+    });
 
-      // tiny buffer before next row (optional)
-      await new Promise(r => setTimeout(r, 1000));
-    } else {
-      console.warn('Click on Button New failed');
-    }
+    // tiny buffer before next row (optional)
+    await new Promise(r => setTimeout(r, 1000));
   }
 
-  // === NEW: After the loop finishes, fill Mon–Fri for all rows ===
-  await new Promise(r => setTimeout(r, 500));           // let the grid render all items
-  await window.fillWeekFromExcel(window.myExcelData);   // fill week % for every Excel row
+  // === After the loop finishes, fill Mon–Fri for all rows ===
+  await new Promise(r => setTimeout(r, 500));        // let the grid render all items
+  await window.fillWeekFromExcel(window.myExcelData); // fill week % for every Excel row
   console.log('✅ Fill success');
 });
-
