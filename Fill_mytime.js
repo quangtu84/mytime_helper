@@ -283,10 +283,7 @@ if (!defaultActivities.includes(activityText)) {
   await pickDropdownOption(activity, activityText);
 }
 
-const customerLogo = await waitForElement('input[placeholder="Search for Customer"]');
-const productName = await waitForElement('input[placeholder="Search for Product"]');
-
-await new Promise(resolve => {
+await new Promise(async resolve => {
   const doSaveAndClose = async () => {
     Array.from(document.querySelectorAll('span.ms-Button-label'))
       .find(el => el.textContent.trim() === "Save and Close")
@@ -295,15 +292,19 @@ await new Promise(resolve => {
     resolve();
   };
 
+  // Case 1: Administration → skip filling
   if (categoryText === 'Administration') {
-    (async () => { await doSaveAndClose(); })();
+    await doSaveAndClose();
     return;
   }
 
-  // --- Case 2: Normal flow ---
+  // Case 2: Normal flow → wait for inputs and fill
+  const customerLogo = await waitForElement('input[placeholder="Search for Customer"]');
+  const productName = await waitForElement('input[placeholder="Search for Product"]');
+
   if (!customerLogo || !productName) {
     console.warn('⚠️ One or more input fields not found. Skipping this row.');
-    doSaveAndClose();
+    await doSaveAndClose();
     return;
   }
 
@@ -318,7 +319,6 @@ await new Promise(resolve => {
     });
   });
 });
-
 
     // tiny buffer before next row (optional)
     await new Promise(r => setTimeout(r, 1000));
