@@ -145,18 +145,19 @@ function fillCommentBox(text) {
   }
 }
 
-async function waitForSaveAndCloseToDisappear(timeout = 10000) {
-  const start = performance.now();
-  while (performance.now() - start < timeout) {
+async function waitForSaveAndCloseToDisappear() {
+  while (true) {
     const button = Array.from(document.querySelectorAll('span.ms-Button-label'))
       .find(el => el.textContent.trim() === "Save and Close");
+
     if (!button || button.offsetParent === null) {
-      return true;
+      return true; // Button is gone or hidden
     }
+
     await new Promise(r => setTimeout(r, 200));
   }
-  return false;
 }
+
 // Fill week values in two passes to avoid row disappearing:
 // Pass 1: fill non-zero days first; Pass 2: clear zero days.
 window.fillWeekFromExcel = async function (dataRows) {
