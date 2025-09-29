@@ -62,6 +62,16 @@ function loadExcelData(callback) {
 // Reusable helper
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
+async function waitForElement(selector, timeout = 5000) {
+  const start = performance.now();
+  while (performance.now() - start < timeout) {
+    const el = document.querySelector(selector);
+    if (el && el.offsetParent !== null) return el; // visible and interactable
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return null;
+}
+
 
 async function pickDropdownOption(caretEl, optionText, timing = {}) {
   const { beforeOpen = 1000, afterOpen = 500, afterPick = 500 } = timing;
@@ -74,8 +84,7 @@ async function pickDropdownOption(caretEl, optionText, timing = {}) {
 
   const option = [...document.querySelectorAll('.ms-Dropdown-optionText')]
     .find(el => el.offsetParent !== null && normalize(el.textContent) === normalize(optionText));
-
-  if (!option) return false;
+  if (!option)  return false;
 
   option.click();
   await delay(afterPick);
@@ -242,9 +251,6 @@ loadExcelData(async () => {
     const tool = mapProductName(row["Product L1"]);
     const comment = row["Case Number"];
 
-    const customerLogo = document.querySelector('input[placeholder="Search for Customer"]');
-    const productName = document.querySelector('input[placeholder="Search for Product"]');
-
     const clickNew = () => document.querySelector('.ms-Button-label')?.closest('button')?.click();
 
     // Keep trying until "New Time Entry" is visible
@@ -259,19 +265,34 @@ loadExcelData(async () => {
     const category = [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[0];
     const activity = [...document.querySelectorAll('.ms-Dropdown-caretDownWrapper')].filter(e => e.offsetParent)[1];
 
-    // === NEW: choose texts based on FTO ===
-    // Treat these as "FTO" types (adjust list as needed)
-    const isFTO = v => /^\s*(FTO|PTO|Flex Time Off)\s*$/i.test((v || '').trim());
-    const categoryText = (isFTO(logo) || isFTO(tool)) ? 'Administration' : 'Post-Sales';
-    const activityText = (isFTO(logo) || isFTO(tool)) ? 'Vacation, LOA' : 'Reactive/Tape-out support';
-
-    // Pick Category and Activity
-    await pickDropdownOption(category, categoryText);
-    await pickDropdownOption(activity, activityText);
+// === NEW: use Category and Activity directly from Excel, with defaults ===
+const categoryText = (row["Category"] || '').trim() || 'Post-Sales';
+const activityText = (row["Activity"] || '').trim() || 'Reactive/Tape-out support';
 
 
 
-// Await the entire fill + save + dialog close flow (FTO vs non-FTO)
+// Pick Category only if it's not "Pre-Sales" (default)
+if (categoryText !== 'Pre-Sales') {
+  await pickDropdownOption(category, categoryText);
+}
+
+// Pick Activity only if it's not one of the default values
+const defaultActivities = [
+  'Marketing events',
+  'Account management',
+  'Paid Consulting',
+  'Administrative',
+  'Recurring issues and crashes',
+  'Architecture, Spec, Use cases'
+];
+
+if (!defaultActivities.includes(activityText)) {
+  await pickDropdownOption(activity, activityText);
+}
+
+const customerLogo = await waitForElement('input[placeholder="Search for Customer"]');
+const productName = await waitForElement('input[placeholder="Search for Product"]');
+
 await new Promise(resolve => {
   const doSaveAndClose = async () => {
     Array.from(document.querySelectorAll('span.ms-Button-label'))
@@ -281,13 +302,18 @@ await new Promise(resolve => {
     resolve();
   };
 
-  // --- Case 1: FTO -> only Save & Close, skip populate flow ---
-  if (isFTO(tool)) {
+  if (categoryText === 'Administration') {
     (async () => { await doSaveAndClose(); })();
     return;
   }
 
-  // --- Case 2: Normal flow -> populate then Save & Close ---
+  // --- Case 2: Normal flow ---
+  if (!customerLogo || !productName) {
+    console.warn('⚠️ One or more input fields not found. Skipping this row.');
+    doSaveAndClose();
+    return;
+  }
+
   populateTextbox(customerLogo, logo, () => {
     waitForLogoToAppearAndClick(logo, () => {
       populateTextbox(productName, tool, () => {
