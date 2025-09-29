@@ -159,13 +159,11 @@ async function waitForSaveAndCloseToDisappear() {
 }
 
 // Fill week values in two passes to avoid row disappearing:
-// Pass 1: fill non-zero days first; Pass 2: clear zero days.
 window.fillWeekFromExcel = async function (dataRows) {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const norm  = s => (s || '').replace(/\u00a0/g, ' ').trim().toLowerCase();
-  const days  = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+  const norm = s => (s || '').replace(/\u00a0/g, ' ').trim().toLowerCase();
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-  // Decide if a target is "zero/empty"
   const isZeroish = (v) => {
     if (v == null) return true;
     const s = String(v).replace(/%/g, '').replace(/[^\d.,-]/g, '').replace(',', '.').trim();
@@ -174,76 +172,70 @@ window.fillWeekFromExcel = async function (dataRows) {
     return !isFinite(n) ? false : n === 0;
   };
 
-  // Get the target text we want to set into the cell (leave as-is from Excel)
   const targetText = (v) => (v == null ? '' : String(v));
 
   for (const r of (dataRows || [])) {
-    const logo = (r['Logo'] || '').trim();
-    const prod = (r['Product L1'] || '').trim();
-    const isFTO = norm(logo) === 'fto' || norm(prod) === 'fto';
+    const logo     = (r['Logo'] || '').trim();
+    const prod     = (r['Product L1'] || '').trim();
+    const category = (r['Category'] || '').trim();
+    const activity = (r['Activity'] || '').trim();
 
-    // Find the row: FTO -> headerColumn1 === "Vacation, LOA"; else normal Logo+Product
     let rowEl;
-    if (isFTO) {
-      rowEl = [...document.querySelectorAll('.ms-DetailsRow-fields[data-automationid="DetailsRowFields"]')]
-        .find(el => norm(el.querySelector('[data-automation-key="headerColumn1"]')?.textContent) === norm('Vacation, LOA'));
-      if (!rowEl) continue;
 
-      // Click the "Vacation, LOA" cell to ensure the row is active/visible
-      const headerCell = rowEl.querySelector('[data-automation-key="headerColumn1"]');
-      headerCell?.scrollIntoView({ block: 'center' });
-      headerCell?.click();
-      await sleep(60);
+    if (norm(category) === 'administration') {
+      // Match only Category and Activity
+      rowEl = [...document.querySelectorAll('.ms-DetailsRow-fields[data-automationid="DetailsRowFields"]')]
+        .find(el =>
+          norm(el.querySelector('[data-automation-key="headerColumn0"]')?.textContent) === norm(category) &&
+          norm(el.querySelector('[data-automation-key="headerColumn1"]')?.textContent) === norm(activity)
+        );
     } else {
+      // Match all four: Logo, Product L1, Category, Activity
       rowEl = [...document.querySelectorAll('.ms-DetailsRow-fields[data-automationid="DetailsRowFields"]')]
         .find(el =>
           norm(el.querySelector('[data-automation-key="headerColumn2"]')?.textContent) === norm(logo) &&
-          norm(el.querySelector('[data-automation-key="headerColumn3"]')?.textContent) === norm(prod)
+          norm(el.querySelector('[data-automation-key="headerColumn3"]')?.textContent) === norm(prod) &&
+          norm(el.querySelector('[data-automation-key="headerColumn0"]')?.textContent) === norm(category) &&
+          norm(el.querySelector('[data-automation-key="headerColumn1"]')?.textContent) === norm(activity)
         );
-      if (!rowEl) continue;
     }
 
-    // Build target values array for Mon..Fri (fallback to %work if day missing)
+    if (!rowEl) continue;
+
     const vals = days.map(d => r[d] ?? r['%work'] ?? r['% work'] ?? '');
 
-    // --- PASS 1: set NON-ZERO targets first ---
+    // --- PASS 1: Fill non-zero values ---
     for (let i = 0; i < 5; i++) {
-      if (isZeroish(vals[i])) continue; // skip zeros for now
+      if (isZeroish(vals[i])) continue;
       const input = rowEl.querySelector(`[data-automation-key="dataColumn${i}"] input`);
       if (!input) continue;
 
       input.focus();
-      // Replace content directly (no prior delete) to avoid empty row state
       input.value = targetText(vals[i]);
-      input.dispatchEvent(new Event('input',  { bubbles: true }));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(40);
     }
 
-    // If all are zeroish, skip clearing to avoid deleting the row entirely
     const hasAnyNonZero = vals.some(v => !isZeroish(v));
-    if (!hasAnyNonZero) {
-      continue; // nothing to fill without risking disappearance
-    }
+    if (!hasAnyNonZero) continue;
 
-    // --- PASS 2: now clear ZERO targets safely (row already has a non-zero) ---
+    // --- PASS 2: Clear zero values ---
     for (let i = 0; i < 5; i++) {
-      if (!isZeroish(vals[i])) continue; // only zero targets
+      if (!isZeroish(vals[i])) continue;
       const input = rowEl.querySelector(`[data-automation-key="dataColumn${i}"] input`);
       if (!input) continue;
 
       input.focus();
-      // Clear the cell
       input.value = '';
-      input.dispatchEvent(new Event('input',  { bubbles: true }));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(30);
     }
 
-    await sleep(80); // small gap before next row
+    await sleep(80);
   }
 };
-
 
 // Start everything (process sequentially)
 loadExcelData(async () => {
