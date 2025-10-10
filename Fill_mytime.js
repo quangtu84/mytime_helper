@@ -1,4 +1,3 @@
-//Product name and Cusomer name mapping due to mismatch between Mytime an
 function mapProductName(productL1) {
   const normalized = (productL1 || '').trim().toLowerCase();
 
@@ -121,35 +120,165 @@ async function waitForText(text, timeout = 10000) {
   return false;
 }
 
-function populateTextbox(element, text, callback) {
-  element.focus();
-  text.split('').forEach((char, index) => {
-    setTimeout(() => {
-      const keyEvent = new KeyboardEvent('keydown', { key: char });
-      element.dispatchEvent(keyEvent);
-      element.value += char;
-      const inputEvent = new Event('input', { bubbles: true });
-      element.dispatchEvent(inputEvent);
+/**
+ * Types text into an input, then loops until it can click the exact suggestion.
+ * If "No results found" is visible, it backspaces 1 character, waits for options
+ * to appear, then retypes that character before checking again.
+ * This function NEVER times out; it keeps trying until success.
+ *
+ * @param {HTMLInputElement} inputEl - the input to type into
+ * @param {string} targetText        - exact visible suggestion text to click
+ * @param {object} [opts]
+ * @param {number} [opts.perCharDelay=90]   - delay between typed chars
+ * @param {number} [opts.checkInterval=140] - polling interval while waiting
+ * @param {number} [opts.afterTypeWait=220] - pause after finishing typing
+ * @param {boolean} [opts.debug=false]      - console.debug tracing
+ * @returns {Promise<void>}
+ */
+async function selectFromSuggestionsForever(inputEl, targetText, opts = {}) {
+  const {
+    perCharDelay  = 90,
+    checkInterval = 140,
+    afterTypeWait = 220,
+    debug         = false
+  } = opts;
 
-      if (index === text.length - 1 && typeof callback === 'function') {
-        setTimeout(callback, 300);
-      }
-    }, index * 100);
-  });
-}
+  if (typeof delay !== 'function') {
+    throw new Error('selectFromSuggestionsForever: `delay(ms)` helper must be defined before this function.');
+  }
 
-function waitForLogoToAppearAndClick(text, callback) {
-  const interval = setInterval(() => {
-    const match = Array.from(document.querySelectorAll('div.ms-Persona-primaryText'))
-      .find(el => el.textContent.trim() === text);
-    if (match) {
-      clearInterval(interval);
-      match.click();
-      if (typeof callback === 'function') {
-        setTimeout(callback, 300);
-      }
+  const log = (...args) => { if (debug) console.debug('[selectFromSuggestionsForever]', ...args); };
+  const normalize = s => (s ?? '').replace(/\u00a0/g, ' ').trim();
+  const eq = (a, b) => normalize(a) === normalize(b);
+  const isVisible = el => !!(el && el.offsetParent !== null);
+
+  const visiblePersonaItems = () =>
+    Array.from(document.querySelectorAll('div.ms-Persona-primaryText')).filter(isVisible);
+
+  const findSuggestionByText = (text) =>
+    visiblePersonaItems().find(el => eq(el.textContent, text)) || null;
+
+  const isNoResultsVisible = () => {
+    const el = document.querySelector('.ms-Suggestions-none');
+    return !!(isVisible(el) && /no results found/i.test(el.textContent || ''));
+  };
+
+  const clickSuggestion = (textEl) => {
+    // Click the closest interactive container, not just the text node
+    const clickable =
+      textEl.closest('[role="option"], .ms-Suggestions-item, .ms-Persona, .ms-PeoplePicker-personaContent') || textEl;
+    clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    clickable.click();
+  };
+
+  const clearInput = () => {
+    inputEl.focus();
+    // Simulate selecting all and backspace for frameworks that track selection
+    inputEl.setSelectionRange(0, inputEl.value.length);
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' }));
+    inputEl.value = '';
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  const typeText = async (text) => {
+    inputEl.focus();
+    clearInput();
+    for (const ch of text) {
+      inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: ch }));
+      inputEl.value += ch;
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      await delay(perCharDelay);
     }
-  }, 200);
+    await delay(afterTypeWait);
+  };
+
+  if (!normalize(targetText)) {
+    throw new Error('selectFromSuggestionsForever: targetText is empty.');
+  }
+
+  // Initial type of the full target text
+  await typeText(targetText);
+  log('Typed initial text:', targetText);
+
+  // Loop indefinitely until we can click the right suggestion
+  while (true) {
+    // 1) If exact suggestion is visible, click and exit
+    const match = findSuggestionByText(targetText);
+    if (match) {
+      clickSuggestion(match);
+      log('Clicked exact match.');
+      await delay(120);
+      return;
+    }
+
+    // 2) If "No results found" is visible: backspace 1 char, then WAIT for options to appear, then retype that char
+    if (isNoResultsVisible()) {
+      const current = inputEl.value || '';
+      log('No results visible. Current value:', current);
+
+      // If the input drifted from target, retype the full target
+      if (!eq(current, targetText)) {
+        log('Input drift detected. Retyping targetText.');
+        await typeText(targetText);
+        continue;
+      }
+
+      let lastChar = '';
+      if (current.length > 0) {
+        lastChar = current.slice(-1);
+
+        // Backspace one char
+        inputEl.focus();
+        inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' }));
+        inputEl.value = current.slice(0, -1);
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        log('Backspaced one char:', lastChar);
+      } else {
+        // Nothing to backspace → retype full text
+        log('Nothing to backspace. Retyping full targetText.');
+        await typeText(targetText);
+        continue;
+      }
+
+      // 🔻 WAIT (no timeout) for options to appear or the exact match to show up
+      while (true) {
+        const direct = findSuggestionByText(targetText);
+        if (direct) {
+          clickSuggestion(direct);
+          log('Clicked match during wait.');
+          await delay(120);
+          return;
+        }
+
+        const anyOptions = visiblePersonaItems().length > 0;
+        const stillNoRes = isNoResultsVisible();
+        if (anyOptions && !stillNoRes) {
+          log('Options appeared after backspace.');
+          break; // proceed to retype last char
+        }
+
+        await delay(checkInterval);
+      }
+
+      // Retype that one char now that options are present
+      inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: lastChar }));
+      inputEl.value += lastChar;
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      log('Retyped last char:', lastChar);
+      await delay(afterTypeWait);
+
+      // Continue → outer loop will re-check for the target suggestion
+      continue;
+    }
+
+    // 3) Neither exact match nor "No results" → keep the input consistent and poll
+    if (!eq(inputEl.value || '', targetText)) {
+      log('Input changed unexpectedly. Restoring targetText.');
+      await typeText(targetText);
+    } else {
+      await delay(checkInterval);
+    }
+  }
 }
 
 function fillCommentBox(text) {
@@ -318,24 +447,24 @@ await new Promise(async resolve => {
 
   // Case 2: Normal flow → wait for inputs and fill
   const customerLogo = await waitForElement('input[placeholder="Search for Customer"]');
-  const productName = await waitForElement('input[placeholder="Search for Product"]');
+  const productName  = await waitForElement('input[placeholder="Search for Product"]');
 
-  if (!customerLogo || !productName) {
-    console.warn('⚠️ One or more input fields not found. Skipping this row.');
-    await doSaveAndClose();
-    return;
-  }
-
-  populateTextbox(customerLogo, logo, () => {
-    waitForLogoToAppearAndClick(logo, () => {
-      populateTextbox(productName, tool, () => {
-        waitForLogoToAppearAndClick(tool, async () => {
-          fillCommentBox(comment);
-          await doSaveAndClose();
-        });
-      });
-    });
+  // Select Logo (will keep trying until it succeeds)
+  await selectFromSuggestionsForever(customerLogo, logo, {
+    perCharDelay: 100,
+    checkInterval: 2000,
+    afterTypeWait: 220
   });
+
+  // Select Product (will keep trying until it succeeds)
+  await selectFromSuggestionsForever(productName, tool, {
+    perCharDelay: 100,
+    checkInterval: 2000,
+    afterTypeWait: 220
+  });
+
+  fillCommentBox(comment);
+  await doSaveAndClose();
 });
 
     // tiny buffer before next row (optional)
