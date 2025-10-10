@@ -1,3 +1,4 @@
+//Product name and Cusomer name mapping due to mismatch between Mytime an
 function mapProductName(productL1) {
   const normalized = (productL1 || '').trim().toLowerCase();
 
@@ -11,6 +12,22 @@ function mapProductName(productL1) {
 
   return mappings[normalized] || productL1;
 }
+
+function mapCustomerName(customerName) {
+  const normalized = (customerName || '').trim().toLowerCase();
+
+  const mappings = {
+    // === Examples; extend as needed ===
+    'proxelera': 'Proxelera',
+    // Add more mappings as needed:
+    // 'abc corp': 'ABC',
+    // 'abc corporation': 'ABC',
+  };
+
+  // Fallback to original value if no mapping found
+  return mappings[normalized] || (customerName || '').trim();
+}
+
 
 
 function loadExcelData(callback) {
@@ -41,7 +58,8 @@ function loadExcelData(callback) {
         // ✅ Use the existing mapProductName function
         window.myExcelData = excelData.map(row => ({
           ...row,
-          'Product L1': mapProductName(row['Product L1'])
+          'Product L1': mapProductName(row['Product L1']),
+          'Logo': mapCustomerName(row['Logo'])
         }));
 
         if (typeof callback === 'function') {
@@ -240,7 +258,7 @@ window.fillWeekFromExcel = async function (dataRows) {
 // Start everything (process sequentially)
 loadExcelData(async () => {
   for (const row of window.myExcelData) {
-    const logo = row["Logo"];
+    const logo = mapCustomerName(row["Logo"]);
     const tool = mapProductName(row["Product L1"]);
     const comment = row["Case Number"];
 
