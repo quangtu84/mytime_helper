@@ -463,7 +463,7 @@ await new Promise(async resolve => {
     afterTypeWait: 220
   });
 
-  fillCommentBox(comment);
+  // fillCommentBox(comment);
   await doSaveAndClose();
 });
 
@@ -476,3 +476,4 @@ await new Promise(async resolve => {
   await window.fillWeekFromExcel(window.myExcelData); // fill week % for every Excel row
   console.log('✅ Fill success');
 });
+
