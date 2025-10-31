@@ -465,6 +465,7 @@ await new Promise(async resolve => {
 
   // fillCommentBox(comment);
   await doSaveAndClose();
+  await new Promise(r => setTimeout(r, 1000));
 });
 
     // tiny buffer before next row (optional)
@@ -476,4 +477,5 @@ await new Promise(async resolve => {
   await window.fillWeekFromExcel(window.myExcelData); // fill week % for every Excel row
   console.log('✅ Fill success');
 });
+
 
